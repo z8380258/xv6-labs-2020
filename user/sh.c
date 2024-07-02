@@ -147,7 +147,7 @@ main(void)
   static char buf[100];
   int fd;
 
-  // Ensure that three file descriptors are open.
+  // Ensure that three file descriptors are open. 保证   0：输入，1：输出，2：错误  打开
   while((fd = open("console", O_RDWR)) >= 0){
     if(fd >= 3){
       close(fd);
@@ -157,13 +157,14 @@ main(void)
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
+    //cd命令
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
       buf[strlen(buf)-1] = 0;  // chop \n
-      if(chdir(buf+3) < 0)
+      if(chdir(buf+3) < 0) //第三位开始
         fprintf(2, "cannot cd %s\n", buf+3);
       continue;
-    }
+    }//其他命令
     if(fork1() == 0)
       runcmd(parsecmd(buf));
     wait(0);
@@ -185,7 +186,7 @@ fork1(void)
 
   pid = fork();
   if(pid == -1)
-    panic("fork");
+    panic("fork"); //打印错误信息并exit(1)
   return pid;
 }
 
