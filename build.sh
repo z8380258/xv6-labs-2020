@@ -1,0 +1,1 @@
+make CPUS=1 qemu-gdb

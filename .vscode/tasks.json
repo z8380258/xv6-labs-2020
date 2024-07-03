@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-extras",
+            "type": "shell",
+            "isBackground": true,
+            "command": "./build.sh",
+
+
+            "problemMatcher": [
+                {
+                    "pattern":[
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern":".",
+                        "endsPattern":".",
+                    }
+                }
+            ],
+        }
+    ]
+}
