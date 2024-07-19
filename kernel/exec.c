@@ -10,7 +10,7 @@
 static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uint sz);
 
 int
-exec(char *path, char **argv)
+exec(char *path, char **argv) //argv是一个指针数组，里面的值是参数的指针
 {
   char *s, *last;
   int i, off;
@@ -35,6 +35,7 @@ exec(char *path, char **argv)
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
+  //创建页表
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
@@ -51,6 +52,9 @@ exec(char *path, char **argv)
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
+      //地址不能高于PLIC
+    if(sz1 >= PLIC)
+      goto bad;
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
@@ -62,35 +66,44 @@ exec(char *path, char **argv)
   ip = 0;
 
   p = myproc();
-  uint64 oldsz = p->sz;
+  uint64 oldsz = p->sz; //保存oldsz以便恢复
 
   // Allocate two pages at the next page boundary.
   // Use the second as the user stack.
+  // 给进程内存扩大两页
   sz = PGROUNDUP(sz);
   uint64 sz1;
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   sz = sz1;
+  //将第一页标记为用户不可访问，应该是guard page吧，防止用户往里写数据导致栈溢出
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
   stackbase = sp - PGSIZE;
 
+  //将用户空间pagetable复制到p->kernelpt，因为上面为了开辟用户栈区更改了用户pagetable
+  u2kvmcopy(pagetable,p->kernelpt,0,sz);
+
   // Push argument strings, prepare rest of stack in ustack.
+  //这里的argv[argc]是指向第argc个字符串的指针
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
       goto bad;
+    //参数按字符串长度确定栈空间，将
     sp -= strlen(argv[argc]) + 1;
-    sp -= sp % 16; // riscv sp must be 16-byte aligned
-    if(sp < stackbase)
+    sp -= sp % 16; // riscv sp must be 16-byte aligned ，riscv要求栈指针16字节对齐
+    if(sp < stackbase) //检查栈指针是否越界
       goto bad;
-    if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
+    //参数复制到用户栈空间
+    if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0) //+1是有/0吧
       goto bad;
-    ustack[argc] = sp;
+    ustack[argc] = sp; //记录参数在栈中的位置/记录参数地址
   }
-  ustack[argc] = 0;
+  ustack[argc] = 0; //最后一个argv是NULL
 
   // push the array of argv[] pointers.
-  sp -= (argc+1) * sizeof(uint64);
+  //每个参数的地址入栈
+  sp -= (argc+1) * sizeof(uint64); //sizeof(uint64)是指针大小
   sp -= sp % 16;
   if(sp < stackbase)
     goto bad;
@@ -109,13 +122,15 @@ exec(char *path, char **argv)
   safestrcpy(p->name, last, sizeof(p->name));
     
   // Commit to the user image.
+  //将当前进程的页表/陷阱帧等切换为新建的进程
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
+  proc_freepagetable(oldpagetable, oldsz); //释放旧进程
 
+  if(p->pid==1) vmprint(p->pagetable);
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:

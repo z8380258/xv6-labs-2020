@@ -22,6 +22,7 @@ static void freeproc(struct proc *p);
 extern char trampoline[]; // trampoline.S
 
 // initialize the proc table at boot time.
+//初始化时调用，初始化每个进程，为每个进程分配一个内核栈
 void
 procinit(void)
 {
@@ -34,14 +35,18 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc)); //从顶向下分配
+      
+      // //上面的宏KSTACK分配了两个页面的大小
+      // //而下面只对一个页面做了映射，另一个页面也没有PTE_V标志，就是guard page
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W); 
+      // p->kstack = va;
   }
-  kvminithart();
+  kvminithart(); //初始化内核页表,确保内核栈正确映射在内核页表中
 }
 
 // Must be called with interrupts disabled,
@@ -78,7 +83,7 @@ allocpid() {
   int pid;
   
   acquire(&pid_lock);
-  pid = nextpid;
+  pid = nextpid; //这里nextpid是个全局变量
   nextpid = nextpid + 1;
   release(&pid_lock);
 
@@ -89,6 +94,7 @@ allocpid() {
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
+//分配一个新的的进程并初始化，页表的堆区和栈区是在exec中实现的
 static struct proc*
 allocproc(void)
 {
@@ -96,7 +102,7 @@ allocproc(void)
 
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
-    if(p->state == UNUSED) {
+    if(p->state == UNUSED) { //找到未使用的proc
       goto found;
     } else {
       release(&p->lock);
@@ -105,21 +111,38 @@ allocproc(void)
   return 0;
 
 found:
-  p->pid = allocpid();
+  p->pid = allocpid(); //分配pid
 
   // Allocate a trapframe page.
-  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+  if((p->trapframe = (struct trapframe *)kalloc()) == 0){ //分配陷阱帧
     release(&p->lock);
     return 0;
   }
 
   // An empty user page table.
+  //分配蹦床和陷阱帧
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
   }
+  //内核页面
+  p->kernelpt = proc_kernelpt_init();
+  if(p->kernelpt == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  //给进程的内核页面分配内核栈
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc)); //从顶向下分配 
+  //上面的宏KSTACK分配了两个页面的大小
+  //而下面只对一个页面做了映射，另一个页面也没有PTE_V标志，就是guard page
+  uvmmap(p->kernelpt,va, (uint64)pa, PGSIZE, PTE_R | PTE_W); 
+  p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -142,6 +165,12 @@ freeproc(struct proc *p)
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  //释放内核栈
+  uvmunmap(p->kernelpt,p->kstack,1,1);
+  p->kstack=0;
+  //释放进程内核页表
+  freeproc_kernelpt(p->kernelpt);
+  p->kernelpt=0;  
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -154,13 +183,14 @@ freeproc(struct proc *p)
 
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
+// 对给定进程创建一个用户页表，映射蹦床页面和陷阱帧
 pagetable_t
 proc_pagetable(struct proc *p)
 {
   pagetable_t pagetable;
 
   // An empty page table.
-  pagetable = uvmcreate();
+  pagetable = uvmcreate(); //创建新page
   if(pagetable == 0)
     return 0;
 
@@ -168,6 +198,7 @@ proc_pagetable(struct proc *p)
   // at the highest user virtual address.
   // only the supervisor uses it, on the way
   // to/from user space, so not PTE_U.
+  // 映射trampoline
   if(mappages(pagetable, TRAMPOLINE, PGSIZE,
               (uint64)trampoline, PTE_R | PTE_X) < 0){
     uvmfree(pagetable, 0);
@@ -221,6 +252,8 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  //复制用户页表到内核页表
+  u2kvmcopy(p->pagetable,p->kernelpt,0,p->sz);
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -235,6 +268,7 @@ userinit(void)
 
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
+//增加或减少n个字节的进程虚拟内存
 int
 growproc(int n)
 {
@@ -242,14 +276,24 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+  // 加限制防止用户内存超过PLIC
+  if(PGROUNDUP(sz+n)>PLIC) return -1;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    sz = uvmalloc(p->pagetable, sz, sz + n);
+    if(sz == 0) {
       return -1;
     }
+    u2kvmcopy(p->pagetable,p->kernelpt,p->sz,sz);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    int npages = (PGROUNDUP(p->sz) - PGROUNDUP(sz)) / PGSIZE;
+    uvmunmap(p->kernelpt,PGROUNDUP(sz),npages,0);
   }
   p->sz = sz;
+  // 答案只对n>0做了复制，n<0就不需要操作了吗？
+  // 好像是的，我们的u2kvmcopy只负责复制，不负责清除诶
+  // 那如果虚拟内存减少了，内核页表中没有清除的映射不会影响吗？
+  
   return 0;
 }
 
@@ -268,27 +312,32 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
+  // 复制页表
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+  
   np->sz = p->sz;
-
+  //用户页表复制到进程内核页表
+  u2kvmcopy(np->pagetable,np->kernelpt,0,np->sz);
   np->parent = p;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
   // Cause fork to return 0 in the child.
+  // fork子进程返回 0，a0一般存储参数或返回值
   np->trapframe->a0 = 0;
 
   // increment reference counts on open file descriptors.
+  // 复制打开的文件描述符
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
-
+  //复制进程名
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -296,7 +345,7 @@ fork(void)
   np->state = RUNNABLE;
 
   release(&np->lock);
-
+  //父进程返回子进程pid，子进程返回0
   return pid;
 }
 
@@ -453,6 +502,7 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// 调度器，本质上是便遍历进程找到RUNNABLE状态的进程，加载进当前CPU执行
 void
 scheduler(void)
 {
@@ -462,7 +512,7 @@ scheduler(void)
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
-    intr_on();
+    intr_on();  //确保设备可以中断，避免死锁
     
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
@@ -473,8 +523,9 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
-        swtch(&c->context, &p->context);
-
+        kernelpt_satp(p->kernelpt); //加载进程kernelpt
+        swtch(&c->context, &p->context); //切换到进程的上下文，执行进程
+        kvminithart(); //运行完归还给内核
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -696,4 +747,23 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+void freeproc_kernelpt(pagetable_t kernelpt)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = kernelpt[i];
+    //最后一层的 PTE_R PTE_W PTE_X 起码有一位为 1
+    if(pte & PTE_V) {
+      kernelpt[i] = 0;
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        // this PTE points to a lower-level page table.
+        uint64 child = PTE2PA(pte);
+        freeproc_kernelpt((pagetable_t)child);       
+      }
+    }
+  }
+  kfree((void*)kernelpt);
 }

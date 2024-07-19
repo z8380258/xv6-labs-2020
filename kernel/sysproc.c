@@ -38,12 +38,13 @@ sys_wait(void)
   return wait(p);
 }
 
+// 扩展或收缩进程的内存空间
 uint64
 sys_sbrk(void)
 {
   int addr;
   int n;
-
+  // 从a0寄存器获取n,n表示需要调整的内存的大小
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;

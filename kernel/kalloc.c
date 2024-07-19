@@ -18,11 +18,15 @@ struct run {
   struct run *next;
 };
 
+//kmem是全局内存管理变量
+//一般来说kmem.freelist指向下一个未分配的内存
 struct {
   struct spinlock lock;
   struct run *freelist;
 } kmem;
 
+//初始化锁
+//释放从 内核内存结束位置 到 PHYSTOP 的内存
 void
 kinit()
 {
@@ -30,6 +34,8 @@ kinit()
   freerange(end, (void*)PHYSTOP);
 }
 
+//释放一个范围内的内存也
+//C语言中，void*可以指向任何一个类型的指针，但是他不能解引用
 void
 freerange(void *pa_start, void *pa_end)
 {
@@ -43,6 +49,8 @@ freerange(void *pa_start, void *pa_end)
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
+
+//释放一个内存页
 void
 kfree(void *pa)
 {
@@ -65,6 +73,9 @@ kfree(void *pa)
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
+
+//开辟一个内存页，其中填充垃圾数据
+//一级页表刚好是 512*8byte=4096byte
 void *
 kalloc(void)
 {

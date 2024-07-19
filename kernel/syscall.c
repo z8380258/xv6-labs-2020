@@ -25,6 +25,11 @@ int
 fetchstr(uint64 addr, char *buf, int max)
 {
   struct proc *p = myproc();
+  //
+    // printf("---user---\n");
+    // vmprint(p->pagetable);
+  //
+  //init进程没有给kernelpt拷贝pagetable，不做这步copyinstr_new会报错
   int err = copyinstr(p->pagetable, buf, addr, max);
   if(err < 0)
     return err;

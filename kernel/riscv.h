@@ -324,7 +324,7 @@ sfence_vma()
 #define PGSHIFT 12  // bits of offset within a page
 
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
-#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1)) //将地址a的低12位清零，保证a是4096倍数
 
 #define PTE_V (1L << 0) // valid
 #define PTE_R (1L << 1)
@@ -333,16 +333,17 @@ sfence_vma()
 #define PTE_U (1L << 4) // 1 -> user can access
 
 // shift a physical address to the right place for a PTE.
-#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
+#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10) //物理地址右移12位再左移十位转为页表的PPN格式
 
 #define PTE2PA(pte) (((pte) >> 10) << 12)
 
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
 // extract the three 9-bit page table indices from a virtual address.
-#define PXMASK          0x1FF // 9 bits
-#define PXSHIFT(level)  (PGSHIFT+(9*(level)))
+#define PXMASK          0x1FF // 9 bits  //九位掩码，即111111111
+#define PXSHIFT(level)  (PGSHIFT+(9*(level)))  //第level级列表，level:0,1,2
 #define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
+//PX的本质就是提取出虚拟地址对应于特定页表的9位
 
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by
@@ -350,5 +351,6 @@ sfence_vma()
 // that have the high bit set.
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
+// pte_t是pte，pagetable_t是指向pagetable的指针
 typedef uint64 pte_t;
 typedef uint64 *pagetable_t; // 512 PTEs

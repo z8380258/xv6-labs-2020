@@ -42,6 +42,7 @@ copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 // Copy bytes to dst from virtual address srcva in a given page table,
 // until a '\0', or max.
 // Return 0 on success, -1 on error.
+// 复制一个字符串，到\0或者长度达max为止
 int
 copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
