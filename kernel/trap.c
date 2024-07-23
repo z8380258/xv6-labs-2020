@@ -43,13 +43,17 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
+  //
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
   
   // save user program counter.
+  // 保存的意义是这个系统调用可能会切换进程，然后执行新的系统调用
+  // 这样sepc会被覆写，所以要和进程相关联
   p->trapframe->epc = r_sepc();
   
+  // 这里是说明trap触发的原因，scause寄存器=8说明是系统调用
   if(r_scause() == 8){
     // system call
 
@@ -58,10 +62,13 @@ usertrap(void)
 
     // sepc points to the ecall instruction,
     // but we want to return to the next instruction.
+    // 对保存的用户程序计数器+4，因为我们现在用户计数器指向ecall
+    // +4后从ecall下一条指令执行
     p->trapframe->epc += 4;
 
     // an interrupt will change sstatus &c registers,
     // so don't enable until done with those registers.
+    // 启用中断，这里不明白
     intr_on();
 
     syscall();
@@ -79,7 +86,7 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
-
+  //返回用户空间
   usertrapret();
 }
 
