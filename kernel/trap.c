@@ -54,6 +54,7 @@ usertrap(void)
   p->trapframe->epc = r_sepc();
   
   // 这里是说明trap触发的原因，scause寄存器=8说明是系统调用
+  // trap有两种触发方式，系统调用 和 中断
   if(r_scause() == 8){
     // system call
 
@@ -84,8 +85,16 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    p->alarm_ticks++;
+    if(p->alarm_time!=0 && p->alarm_ticks==p->alarm_time && p->is_alarming == 0){
+      memmove(p->trapframe_alarm,p->trapframe,sizeof(struct trapframe));
+      p->is_alarming=1;   
+      p->trapframe->epc=(uint64)p->alarm_handler;
+      p->alarm_ticks=0;
+    }
     yield();
+  }
   //返回用户空间
   usertrapret();
 }
@@ -211,6 +220,7 @@ devintr()
     // software interrupt from a machine-mode timer interrupt,
     // forwarded by timervec in kernelvec.S.
 
+    //定时器中断，全局定时器，只在一个核上
     if(cpuid() == 0){
       clockintr();
     }

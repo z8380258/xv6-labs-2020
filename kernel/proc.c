@@ -127,6 +127,16 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //初始化计时器内容
+  p->alarm_time=0;
+  p->alarm_ticks=0;
+  p->alarm_handler=0;
+  p->is_alarming=0;
+  if((p->trapframe_alarm = (struct trapframe *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
   return p;
 }
 
@@ -150,6 +160,15 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  //释放告警相关参数
+  p->alarm_time=0;
+  p->alarm_ticks=0;
+  p->alarm_handler=0;
+  p->is_alarming=0;
+  if(p->trapframe_alarm)
+    kfree((void*)p->trapframe_alarm);  
+  p->trapframe_alarm=0;
 }
 
 // Create a user page table for a given process,
