@@ -64,10 +64,24 @@ argint(int n, int *ip)
 // Retrieve an argument as a pointer.
 // Doesn't check for legality, since
 // copyin/copyout will do that.
+// 把寄存器中的内容存在ip指向的位置，这里存的是地址
 int
-argaddr(int n, uint64 *ip)
+argaddr(int n, uint64 *ip) 
 {
-  *ip = argraw(n);
+  *ip = argraw(n); 
+  struct proc* p=myproc();
+  if(walkaddr(p->pagetable,*ip)==0){ //内存还未分配
+    if(*ip > PGROUNDUP(p->trapframe->sp) && *ip<p->sz){
+      char *pa=kalloc();
+      if(pa==0) return -1;
+      memset(pa,0,PGSIZE);
+      if(mappages(p->pagetable, PGROUNDDOWN(*ip), PGSIZE, (uint64)pa, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(pa);     
+        return -1;
+      }            
+    }else return -1;
+
+  }
   return 0;
 }
 
