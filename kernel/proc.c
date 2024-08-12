@@ -123,6 +123,7 @@ found:
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
+  // 上下文置零
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
@@ -453,6 +454,8 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+
+// 找到一个RUNNABLE进程并运行他，这个函数在main中调用，并且是死循环，所以他在一直运行
 void
 scheduler(void)
 {
@@ -486,7 +489,7 @@ scheduler(void)
     }
     if(nproc <= 2) {   // only init and sh exist
       intr_on();
-      asm volatile("wfi");
+      asm volatile("wfi"); //wait for interrupt指令
     }
   }
 }
