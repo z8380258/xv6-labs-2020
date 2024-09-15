@@ -559,6 +559,8 @@ forkret(void)
 
 // Atomically release lock and sleep on chan.
 // Reacquires lock when awakened.
+
+//把锁传进来就是为了给sleep条件加个锁，防止lost wakeup
 void
 sleep(void *chan, struct spinlock *lk)
 {
@@ -577,9 +579,9 @@ sleep(void *chan, struct spinlock *lk)
 
   // Go to sleep.
   p->chan = chan;
-  p->state = SLEEPING;
+  p->state = SLEEPING; //进程sleep
 
-  sched();
+  sched(); //调度切换
 
   // Tidy up.
   p->chan = 0;

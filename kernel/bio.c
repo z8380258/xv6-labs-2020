@@ -23,6 +23,7 @@
 #include "fs.h"
 #include "buf.h"
 
+// 缓存区结构bcache
 struct {
   struct spinlock lock;
   struct buf buf[NBUF];
@@ -33,16 +34,20 @@ struct {
   struct buf head;
 } bcache;
 
+
+// 初始化buf，buf之间以 环形链表 形式连接
 void
 binit(void)
 {
   struct buf *b;
 
   initlock(&bcache.lock, "bcache");
-
+  
   // Create linked list of buffers
+  //初始化head,使之变为一个 空双向链表
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
+  //bcache中每个buf初始化，每个循环将b插入head后一位，相当于插在head和head.next中间，可以维护双向链表
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
     b->next = bcache.head.next;
     b->prev = &bcache.head;
@@ -55,12 +60,13 @@ binit(void)
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
+// 在缓存中找dev和blockno匹配的buf，找到了直接返回，没找到就分配一个引用计数为0的buf,都没有即缓存满了报panic
 static struct buf*
-bget(uint dev, uint blockno)
+bget(uint dev, uint blockno) //
 {
   struct buf *b;
 
-  acquire(&bcache.lock);
+  acquire(&bcache.lock); //获取缓存区的大锁
 
   // Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
@@ -74,6 +80,8 @@ bget(uint dev, uint blockno)
 
   // Not cached.
   // Recycle the least recently used (LRU) unused buffer.
+  // 因为brelse将释放的buf插在链表头节点后一位，所以越靠后越不常用
+  // 因此这里从头节点逆向向前找，就是找到一个最不常用的释放掉并分配给新的block
   for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
     if(b->refcnt == 0) {
       b->dev = dev;
@@ -81,7 +89,7 @@ bget(uint dev, uint blockno)
       b->valid = 0;
       b->refcnt = 1;
       release(&bcache.lock);
-      acquiresleep(&b->lock);
+      acquiresleep(&b->lock); 
       return b;
     }
   }
@@ -89,6 +97,7 @@ bget(uint dev, uint blockno)
 }
 
 // Return a locked buf with the contents of the indicated block.
+// 从磁盘读一个块儿到缓冲区
 struct buf*
 bread(uint dev, uint blockno)
 {

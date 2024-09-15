@@ -374,32 +374,60 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
+// 会返回inode中addrs块儿号为bn的实际物理块儿号。
 static uint
 bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
-
+  // n<12
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
-  bn -= NDIRECT;
-
+  bn -= NDIRECT; //n-=12
+  // 0<=n<256
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+    if((addr = ip->addrs[NDIRECT]) == 0) //indirect都没分配
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
+    bp = bread(ip->dev, addr); //
+    a = (uint*)bp->data; //4字节为单位
+    if((addr = a[bn]) == 0){ //如果分配了，addr=a[bn]；如果没分配则分配
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT; //n-=12
+  
+  if(bn<NINDIRECT2){
+    int index1=bn/ADDRNUMPERBLOCK;
+    int index2=bn%ADDRNUMPERBLOCK;
+    if((addr = ip->addrs[NDIRECT+1]) == 0) 
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr); //
+    a = (uint*)bp->data; //4字节为单位
+    if((addr = a[index1]) == 0){ //如果分配了，addr=a[bn]；如果没分配则分配
+      a[index1] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);   
+
+    bp = bread(ip->dev, addr); //
+    a = (uint*)bp->data; //4字节为单位
+    if((addr = a[index2]) == 0){ //如果分配了，addr=a[bn]；如果没分配则分配
+      a[index2] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);   
+    return addr;
+  }
+
+
+
 
   panic("bmap: out of range");
 }
@@ -431,6 +459,31 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
+
+  struct buf* bp1;
+  uint* a1;
+  if(ip->addrs[NDIRECT + 1]) {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+    for(i = 0; i < ADDRNUMPERBLOCK; i++) {
+      // 每个一级间接块的操作都类似于上面的
+      // if(ip->addrs[NDIRECT])中的内容
+      if(a[i]) {
+        bp1 = bread(ip->dev, a[i]);
+        a1 = (uint*)bp1->data;
+        for(j = 0; j < ADDRNUMPERBLOCK; j++) {
+          if(a1[j])
+            bfree(ip->dev, a1[j]);
+        }
+        brelse(bp1);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
+  }
+
 
   ip->size = 0;
   iupdate(ip);
@@ -530,7 +583,7 @@ struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
   uint off, inum;
-  struct dirent de;
+  struct dirent de; //这个de就是entry
 
   if(dp->type != T_DIR)
     panic("dirlookup not DIR");

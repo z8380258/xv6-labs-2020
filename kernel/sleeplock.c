@@ -33,7 +33,8 @@ acquiresleep(struct sleeplock *lk)
 void
 releasesleep(struct sleeplock *lk)
 {
-  acquire(&lk->lk);
+  //release也调用这个锁，这样如果正在执行sleep流程，release就会被暂停，防止lost wakeup
+  acquire(&lk->lk); 
   lk->locked = 0;
   lk->pid = 0;
   wakeup(lk);
