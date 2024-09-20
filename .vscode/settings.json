@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "defs.h": "c",
-        "param.h": "c"
+        "param.h": "c",
+        "buf.h": "c",
+        "types.h": "c"
     }
 }
